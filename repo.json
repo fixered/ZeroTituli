@@ -1,0 +1,9 @@
+{
+    "name": "Zero Tituli",
+    "iconUrl": "https://raw.githubusercontent.com/fixered/zeroTituli/master/repo_icon.png",
+    "description": "Repository for italian streaming",
+    "manifestVersion": 1,
+    "pluginLists": [
+        "https://raw.githubusercontent.com/fixered/zeroTituli/builds/plugins.json"
+    ]
+}
