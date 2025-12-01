@@ -93,7 +93,6 @@ class Hattrick : MainAPI() {
         }
     }
 
-    // Attempt to parse obfuscated scripts similarly to CalcioStreaming
     private fun getStreamUrl(document: Document): String? {
         // Look for obvious iframe src
         val iframe = document.selectFirst("iframe")?.attr("src")
