@@ -35,55 +35,21 @@ class Hattrick : MainAPI() {
                 val href = a.attr("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 val title = a.text().ifBlank { "Live Channel" }
                 val poster = a.closest("div.row")?.selectFirst("img.mascot")?.attr("src") ?: ""
+
+                val Iframedocument = app.get(href).document
+                val iframeLinkUrl = Iframedocument.select("iframe[src]")
+                    .map { it.attr("src") }
+                    .firstOrNull { it.isNotBlank() && !it.contains("histats") }
+
                 
-                newLiveSearchResponse(title, fixUrl(href), TvType.Live) {
+                newLiveSearchResponse(title, fixUrl(iframeLinkUrl), TvType.Live) {
                     this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else ""
                 }
             }
-        
-        if (channelButtons.isNotEmpty()) {
-            lists.add(HomePageList("Canali On Line", channelButtons.take(15), isHorizontalImages = false))
-        }
 
-        val eventRows = document.select("div.events div.row").drop(1).mapNotNull { row ->
-            try {
-                // Get match title from game-name span
-                val title = row.selectFirst("a.game-name span")?.text()?.trim() 
-                    ?: row.selectFirst("span")?.text()?.trim() 
-                    ?: return@mapNotNull null
-                
-                // Skip if it's the channel list row
-                if (title.contains("Canali On Line", ignoreCase = true)) return@mapNotNull null
-                
-                val date = row.selectFirst("p.date")?.text()?.trim() ?: ""
-                val logo = row.selectFirst("img.mascot")?.attr("src") ?: ""
-                
-                // Get all stream buttons in this row
-                val buttons = row.select("button a[href]")
-                .filter { it.attr("href").contains(".htm") }
-                .mapNotNull { a ->
-                    val aChannel = a.text()
-                    val href = a.attr("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                    val linkName = a.text().ifBlank { title }
-                    
-                    newLiveSearchResponse(
-                        aChannel,
-                        fixUrl(href), 
-                        TvType.Live
-                    ) {
-                        this.posterUrl = if (logo.isNotBlank()) fixUrl(logo) else ""
-                    }
-                }
-                
-                if (buttons.isEmpty()) return@mapNotNull null
-                HomePageList(title, buttons, isHorizontalImages = false)
-            } catch (e: Exception) {
-                Log.e("Hattrick", "Error parsing event row: ${e.message}")
-                null
-            }
+        if (channelButtons.isNotEmpty()) {
+            lists.add(HomePageList("Canali On Line", channelButtons, isHorizontalImages = false))
         }
-        
-        lists.addAll(eventRows)
 
         if (lists.isEmpty()) throw ErrorLoadingException("No content found")
 
