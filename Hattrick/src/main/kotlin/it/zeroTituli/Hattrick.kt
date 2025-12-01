@@ -16,136 +16,150 @@ class Hattrick : MainAPI() {
     override val hasMainPage = true
     override val hasChromecastSupport = true
     override val supportedTypes = setOf(TvType.Live)
-    val cfKiller = CloudflareKiller()
+
+    private val cfKiller = CloudflareKiller()
+
+    private fun fixUrl(url: String): String {
+        if (url.isEmpty()) return url
+        return if (url.startsWith("http")) url else (mainUrl.trimEnd('/') + "/" + url.trimStart('/'))
+    }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl).document
+        val lists = ArrayList<HomePageList>()
+
+        // 1) Collect channel buttons - they are inside <button><a>
+        val channelButtons = document.select("button.btn a[href]")
+            .filter { it.attr("href").contains(".htm") }
+            .mapNotNull { a ->
+                val href = a.attr("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val title = a.text().ifBlank { "Live Channel" }
+                val poster = a.closest("div.row")?.selectFirst("img.mascot")?.attr("src") ?: ""
+                
+                newLiveSearchResponse(title, fixUrl(href), TvType.Live) {
+                    this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else ""
+                }
+            }
         
-        val homePageLists = mutableListOf<HomePageList>()
-        
-        // Parse tutti gli eventi dalla pagina
-        val allEvents = document.select("div.events div.row").mapNotNull { row ->
+        if (channelButtons.isNotEmpty()) {
+            lists.add(HomePageList("Canali On Line", channelButtons.take(15), isHorizontalImages = false))
+        }
+
+        // 2) Collect event rows - each row contains match info and buttons
+        val eventRows = document.select("div.events div.row").drop(1).mapNotNull { row ->
             try {
-                val details = row.selectFirst("div.details") ?: return@mapNotNull null
-                val gameName = details.selectFirst("a.game-name span")?.text() ?: return@mapNotNull null
-                val date = details.selectFirst("p.date")?.text() ?: ""
+                // Get match title from game-name span
+                val title = row.selectFirst("a.game-name span")?.text()?.trim() 
+                    ?: row.selectFirst("span")?.text()?.trim() 
+                    ?: return@mapNotNull null
                 
-                // Estrai tutti i bottoni/link disponibili
-                val buttons = details.select("button a[href]")
+                // Skip if it's the channel list row
+                if (title.contains("Canali On Line", ignoreCase = true)) return@mapNotNull null
+                
+                val date = row.selectFirst("p.date")?.text()?.trim() ?: ""
+                val logo = row.selectFirst("img.mascot")?.attr("src") ?: ""
+                
+                // Get all stream buttons in this row
+                val buttons = row.select("button.btn a[href]")
+                    .filter { it.attr("href").contains(".htm") }
+                    .mapNotNull { a ->
+                        val href = a.attr("href").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        val linkName = a.text().ifBlank { title }
+                        
+                        newLiveSearchResponse(
+                            "$title ${if (date.isNotBlank()) "— $date" else ""}", 
+                            fixUrl(href), 
+                            TvType.Live
+                        ) {
+                            this.posterUrl = if (logo.isNotBlank()) fixUrl(logo) else ""
+                        }
+                    }
+                
                 if (buttons.isEmpty()) return@mapNotNull null
-                
-                val posterUrl = row.selectFirst("div.logos img")?.attr("src") 
-                    ?: "https://logowiki.net/wp-content/uploads/imgp/Hattrick-Logo-1-5512.jpg"
-                
-                // Se è la sezione "Canali On Line", crea una lista separata
-                if (gameName.contains("Canali On Line", ignoreCase = true)) {
-                    val channels = buttons.mapNotNull { btn ->
-                        val href = btn.attr("href")
-                        val channelName = btn.text()
-                        if (href.isNotBlank() && channelName.isNotBlank()) {
-                            newLiveSearchResponse(channelName, fixUrl(href), TvType.Live) {
-                                this.posterUrl = posterUrl
-                            }
-                        } else null
-                    }
-                    if (channels.isNotEmpty()) {
-                        homePageLists.add(HomePageList("Canali Live", channels, isHorizontalImages = true))
-                    }
-                    return@mapNotNull null
-                }
-                
-                // Per gli eventi, prendi il primo link disponibile come URL principale
-                val firstButton = buttons.firstOrNull() ?: return@mapNotNull null
-                val href = firstButton.attr("href")
-                
-                if (href.isBlank()) return@mapNotNull null
-                
-                newLiveSearchResponse("$gameName${if (date.isNotEmpty()) " - $date" else ""}", fixUrl(href), TvType.Live) {
-                    this.posterUrl = posterUrl
-                }
+                HomePageList(title, buttons, isHorizontalImages = false)
             } catch (e: Exception) {
-                Log.d("Hattrick", "Error parsing event: ${e.message}")
+                Log.e("Hattrick", "Error parsing event row: ${e.message}")
                 null
             }
         }
         
-        // Aggiungi eventi in programma se ce ne sono
-        if (allEvents.isNotEmpty()) {
-            homePageLists.add(HomePageList("Eventi in Programma", allEvents, isHorizontalImages = true))
-        }
-        
-        // Se non abbiamo trovato nulla, ritorna lista vuota
-        if (homePageLists.isEmpty()) {
-            throw ErrorLoadingException("Nessun evento trovato")
-        }
+        lists.addAll(eventRows)
 
-        return newHomePageResponse(homePageLists, false)
+        if (lists.isEmpty()) throw ErrorLoadingException("No content found")
+
+        return newHomePageResponse(lists, false)
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
         
-        val title = document.selectFirst("title")?.text()?.substringBefore(" -") 
-            ?: url.substringAfterLast("/").substringBefore(".")
+        val title = document.selectFirst("h1")?.text()
+            ?: document.selectFirst("title")?.text()
+            ?: name
         
+        val poster = document.selectFirst("img.mascot")?.attr("src")
+            ?: document.selectFirst("meta[property=og:image]")?.attr("content")
+            ?: ""
+        
+        val description = document.selectFirst("p.date")?.text()
+            ?: document.selectFirst("meta[name=description]")?.attr("content") 
+            ?: ""
+
         return newLiveStreamLoadResponse(name = title, url = url, dataUrl = url) {
-            this.posterUrl = "https://logowiki.net/wp-content/uploads/imgp/Hattrick-Logo-1-5512.jpg"
+            this.posterUrl = if (poster.isNotBlank()) fixUrl(poster) else ""
+            this.plot = description
         }
     }
 
     private fun getStreamUrl(document: Document): String? {
-        // Cerca iframe nella pagina
+        // Look for iframe src
         val iframe = document.selectFirst("iframe")?.attr("src")
-        if (!iframe.isNullOrEmpty()) {
-            return iframe
-        }
+        if (!iframe.isNullOrBlank() && !iframe.contains("histats")) return fixUrl(iframe)
 
-        // Cerca script offuscati
-        val scripts = document.body().select("script")
-        val obfuscatedScript = scripts.findLast { it.data().contains("eval(") }
+        // Look for obfuscated script
+        val scripts = document.select("script")
+        val obfuscated = scripts.findLast { 
+            it.data().contains("eval(") || it.data().contains("split")
+        }
         
-        return obfuscatedScript?.let {
+        val data = obfuscated?.data()?.let {
             try {
-                val data = getAndUnpack(it.data())
-                val sourceRegex = "(?<=src=\")([^\"]+)".toRegex()
-                val source = sourceRegex.find(data)?.value
-                source
+                getAndUnpack(it)
             } catch (e: Exception) {
-                Log.d("Hattrick", "Error extracting stream: ${e.message}")
                 null
             }
         }
+        
+        if (!data.isNullOrBlank()) {
+            // Look for src= patterns
+            val regex = """(?:src=["']|src:\s*["'])([^"']+)""".toRegex()
+            val match = regex.find(data)?.groupValues?.get(1)
+            if (!match.isNullOrBlank()) return fixUrl(match)
+        }
+        
+        return null
     }
 
-    private suspend fun extractVideoStream(url: String, ref: String, n: Int): Pair<String, String>? {
+    private suspend fun extractVideoStream(url: String, ref: String, depth: Int = 1): Pair<String, String>? {
         if (url.toHttpUrlOrNull() == null) return null
-        if (n > 10) return null
-
+        if (depth > 10) return null
+        
         try {
             val doc = app.get(url, referer = ref).document
-            
-            // Cerca iframe
-            val iframeUrl = doc.selectFirst("iframe")?.attr("src")
-            if (!iframeUrl.isNullOrEmpty()) {
-                val newPage = app.get(fixUrl(iframeUrl), referer = url).document
-                val streamUrl = getStreamUrl(newPage)
-                
-                if (!streamUrl.isNullOrEmpty()) {
-                    return streamUrl to fixUrl(iframeUrl)
-                }
-                
-                // Ricorsione
-                return extractVideoStream(iframeUrl, url, n + 1)
-            }
-            
-            // Cerca stream diretto
             val streamUrl = getStreamUrl(doc)
-            if (!streamUrl.isNullOrEmpty()) {
-                return streamUrl to url
-            }
             
+            if (!streamUrl.isNullOrBlank()) {
+                val fixed = fixUrl(streamUrl)
+                // If it looks like a playable stream, return it
+                if (fixed.contains(".m3u8") || fixed.contains("playlist") || 
+                    fixed.contains(".mpd") || fixed.contains("/live/")) {
+                    return fixed to url
+                }
+                // Otherwise, follow it recursively
+                return extractVideoStream(fixed, url, depth + 1)
+            }
         } catch (e: Exception) {
-            Log.d("Hattrick", "Error in extractVideoStream: ${e.message}")
+            Log.e("Hattrick", "Error extracting stream: ${e.message}")
         }
         
         return null
@@ -157,81 +171,51 @@ class Hattrick : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        try {
-            val document = app.get(data).document
-            
-            // Cerca iframe diretto nella pagina
-            val directIframe = document.selectFirst("iframe.video, iframe[name='iframe_a']")?.attr("src")
-            if (!directIframe.isNullOrEmpty()) {
-                val link = extractVideoStream(fixUrl(directIframe), data, 1)
-                if (link != null) {
-                    callback(
-                        ExtractorLink(
-                            source = this.name,
-                            name = "Stream",
-                            url = link.first,
-                            referer = link.second,
-                            quality = Qualities.Unknown.value,
-                            type = ExtractorLinkType.M3U8
-                        )
-                    )
-                    return true
-                }
+        val document = app.get(data).document
+        val links = mutableListOf<Pair<String, String>>()
+
+        // Try to find iframe
+        val iframeSrc = document.select("iframe")
+            .map { it.attr("src") }
+            .firstOrNull { it.isNotBlank() && !it.contains("histats") }
+
+        if (!iframeSrc.isNullOrBlank()) {
+            val resolved = extractVideoStream(fixUrl(iframeSrc), data, 1)
+            if (resolved != null) {
+                links.add(resolved)
+            } else {
+                links.add(fixUrl(iframeSrc) to data)
             }
-            
-            // Cerca bottoni con link
-            val buttons = document.select("button a[href], a[href*='.htm']")
-            if (buttons.isNotEmpty()) {
-                buttons.forEachIndexed { index, element ->
-                    val url = element.attr("href")
-                    val name = element.text().ifEmpty { "Stream ${index + 1}" }
-                    
-                    if (url.isNotEmpty()) {
-                        val link = extractVideoStream(fixUrl(url), data, 1)
-                        if (link != null) {
-                            callback(
-                                ExtractorLink(
-                                    source = this.name,
-                                    name = name,
-                                    url = link.first,
-                                    referer = link.second,
-                                    quality = Qualities.Unknown.value,
-                                    type = ExtractorLinkType.M3U8
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-            
-            // Cerca link diretti nello stream
-            val streamLink = extractVideoStream(data, data, 1)
-            if (streamLink != null) {
-                callback(
-                    ExtractorLink(
-                        source = this.name,
-                        name = "Direct Stream",
-                        url = streamLink.first,
-                        referer = streamLink.second,
-                        quality = Qualities.Unknown.value,
-                        type = ExtractorLinkType.M3U8
-                    )
-                )
-                return true
-            }
-            
-        } catch (e: Exception) {
-            Log.d("Hattrick", "Error loading links: ${e.message}")
         }
-        
-        return false
+
+        // If no iframe, try direct m3u8 in HTML
+        if (links.isEmpty()) {
+            val m3u8Regex = """(https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)""".toRegex()
+            val m3u8 = m3u8Regex.find(document.html())?.value
+            if (!m3u8.isNullOrBlank()) {
+                links.add(m3u8 to data)
+            }
+        }
+
+        // Emit extractor links
+        links.forEachIndexed { idx, (url, ref) ->
+            Log.d("Hattrick", "Adding link: $url")
+            callback(
+                ExtractorLink(
+                    source = this.name,
+                    name = "Hattrick ${idx + 1}",
+                    url = url,
+                    referer = ref,
+                    quality = Qualities.Unknown.value,
+                    type = if (url.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                )
+            )
+        }
+
+        return links.isNotEmpty()
     }
 
     override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor {
-        return object : Interceptor {
-            override fun intercept(chain: Interceptor.Chain): Response {
-                return cfKiller.intercept(chain)
-            }
-        }
+        return cfKiller
     }
 }
