@@ -102,17 +102,19 @@ class Hattrick : MainAPI() {
         val links = document.select("iframe").mapNotNull { it ->
             val lang = "it"
             val url = it.attr("src")
-                
+             Log.d("Url", url)   
             val domain = try {
                 val uri = java.net.URL(url)
                 "${uri.protocol}://${uri.host}"
             } catch (e: Exception) {
                 null
             }
+            Log.d("Domain", domain)
         
             if (domain == null) return@mapNotNull null
         
             val link = extractVideoStream(url, domain, 1)
+            Log.d("Link", link)
             if (link == null) return@mapNotNull null
         
             Link(lang, link.first, link.second)
