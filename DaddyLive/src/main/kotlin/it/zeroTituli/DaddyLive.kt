@@ -25,22 +25,18 @@ class DaddyLive : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val daznList = daznChannels.map { channel ->
-            LiveSearchResponse(
-                name = channel.name,
-                url = "$mainUrl/watch.php?id=${channel.id}",
-                apiName = this.name,
-                type = TvType.Live,
-                posterUrl = null
+            newLiveSearchResponse(
+                channel.name,
+                "$mainUrl/watch.php?id=${channel.id}",
+                TvType.Live,
             )
         }
 
         val skyList = skyChannels.map { channel ->
-            LiveSearchResponse(
-                name = channel.name,
-                url = "$mainUrl/watch.php?id=${channel.id}",
-                apiName = this.name,
-                type = TvType.Live,
-                posterUrl = null
+            newLiveSearchResponse(
+                channel.name,
+                "$mainUrl/watch.php?id=${channel.id}",
+                TvType.Live,
             )
         }
 
@@ -60,12 +56,10 @@ class DaddyLive : MainAPI() {
             it.name.contains(query, ignoreCase = true) || 
             it.id.contains(query, ignoreCase = true)
         }.map { channel ->
-            LiveSearchResponse(
-                name = channel.name,
-                url = "$mainUrl/watch.php?id=${channel.id}",
-                apiName = this.name,
-                type = TvType.Live,
-                posterUrl = null
+            newLiveSearchResponse(
+                channel.name,
+                "$mainUrl/watch.php?id=${channel.id}",
+                TvType.Live,
             )
         }
     }
