@@ -27,16 +27,14 @@ class DaddyLive : MainAPI() {
         val daznList = daznChannels.map { channel ->
             newLiveSearchResponse(
                 channel.name,
-                "$mainUrl/watch.php?id=${channel.id}",
-                TvType.Live,
+                "$mainUrl/watch.php?id=${channel.id}"
             )
         }
 
         val skyList = skyChannels.map { channel ->
             newLiveSearchResponse(
                 channel.name,
-                "$mainUrl/watch.php?id=${channel.id}",
-                TvType.Live,
+                "$mainUrl/watch.php?id=${channel.id}"
             )
         }
 
@@ -51,15 +49,14 @@ class DaddyLive : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val allChannels = daznChannels + skyChannels
-        
-        return allChannels.filter { 
-            it.name.contains(query, ignoreCase = true) || 
-            it.id.contains(query, ignoreCase = true)
+
+        return allChannels.filter {
+            it.name.contains(query, ignoreCase = true) ||
+                    it.id.contains(query, ignoreCase = true)
         }.map { channel ->
             newLiveSearchResponse(
                 channel.name,
-                "$mainUrl/watch.php?id=${channel.id}",
-                TvType.Live,
+                "$mainUrl/watch.php?id=${channel.id}"
             )
         }
     }
@@ -68,13 +65,14 @@ class DaddyLive : MainAPI() {
         val channelId = url.substringAfter("id=")
         val allChannels = daznChannels + skyChannels
         val channel = allChannels.find { it.id == channelId }
-        val title = channel?.name ?: "Channel $channelId"
-        
-        return newLiveStreamLoadResponse(
-            name = title,
+
+        return LiveStreamLoadResponse(
+            name = channel?.name ?: "Channel $channelId",
             url = url,
-            type = TvType.Live
-    )
+            type = TvType.Live,
+            dataUrl = url
+        )
+    }
 
     override suspend fun loadLinks(
         data: String,
@@ -82,9 +80,9 @@ class DaddyLive : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+
         val channelId = data.substringAfter("id=")
-        
-        // Lista dei player disponibili
+
         val players = listOf(
             "stream" to "Player 1",
             "cast" to "Player 2",
@@ -93,20 +91,18 @@ class DaddyLive : MainAPI() {
             "casting" to "Player 5",
             "player" to "Player 6"
         )
-        
+
         players.forEach { (playerType, playerName) ->
             try {
                 val playerUrl = "$mainUrl/$playerType/stream-$channelId.php"
-                val playerDoc = app.get(playerUrl).document
-                
-                // Cerca iframe nello stream
-                val iframe = playerDoc.selectFirst("iframe[src]")
+                val doc = app.get(playerUrl).document
+                val iframe = doc.selectFirst("iframe[src]")
                 val streamUrl = iframe?.attr("src")
-                
+
                 if (!streamUrl.isNullOrBlank()) {
                     callback.invoke(
                         newExtractorLink(
-                            source = this.name,
+                            source = name,
                             name = "$name - $playerName",
                             url = fixUrl(streamUrl),
                             type = ExtractorLinkType.M3U8
@@ -114,9 +110,10 @@ class DaddyLive : MainAPI() {
                     )
                 }
             } catch (e: Exception) {
+                // ignora player non disponibili
             }
         }
-        
+
         return true
     }
 }
