@@ -86,14 +86,12 @@ class Hattrick : MainAPI() {
 
     private fun getStreamUrl(document: Document): String? {
         try {
-            // Primo tentativo: cerca iframe diretti
             val directIframe = document.select("iframe[src]").firstOrNull()?.attr("src")
-            if (!directIframe.isNullOrBlank() && directIframe.contains("freeshot.live")) {
+            if (!directIframe.isNullOrBlank()) {
                 Log.d("Hattrick-DirectIframe", directIframe)
                 return directIframe
             }
 
-            // Secondo tentativo: cerca negli script offuscati
             val scripts = document.select("script")
             for (script in scripts) {
                 val scriptData = script.data()
@@ -161,7 +159,6 @@ class Hattrick : MainAPI() {
             
             val document = app.get(data).document
             
-            // Cerca tutti gli iframe nella pagina
             val iframes = document.select("iframe[src]")
             
             if (iframes.isEmpty()) {
