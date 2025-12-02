@@ -1,4 +1,4 @@
-package com.example
+package it.zeroTituli
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
