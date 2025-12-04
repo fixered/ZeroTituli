@@ -107,9 +107,8 @@ class DaddyLive : MainAPI() {
             catch (e: Exception) {
                 null
             }
-            val link = extractVideoStream(url, host ?: return@mapNotNull null, 1)
             if (link == null) return@mapNotNull null
-                Link(lang, link.first, link.second)
+                Link(lang, url, host)
         }
         links.map {
             callback(
