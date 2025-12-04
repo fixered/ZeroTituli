@@ -24,7 +24,6 @@ class HattrickProvider : MainAPI() {
             val links = row.select(".details button a").map { it.attr("href") }
 
             if (nameInfo.isNotBlank() && links.isNotEmpty()) {
-                // FIX: Use mapper.writeValueAsString instead of AppUtils.toJson
                 val dataUrl = mapper.writeValueAsString(links)
                 
                 liveEvents.add(
@@ -41,10 +40,8 @@ class HattrickProvider : MainAPI() {
 
     // 2. Load: Display the list of sources
     override suspend fun load(url: String): LoadResponse {
-        // FIX: Use mapper.readValue to get the list back
         val linkList = mapper.readValue<List<String>>(url)
 
-        // FIX: We pass emptyList() to the constructor, and set episodes manually inside
         return newTvSeriesLoadResponse("Match Sources", url, TvType.Live, emptyList()) {
             this.plot = "Select a source to watch."
             this.posterUrl = null 
@@ -70,23 +67,22 @@ class HattrickProvider : MainAPI() {
         // 'url' is the specific page for that button (e.g. sport24.htm)
         val doc = app.get(url, headers = mapOf("Referer" to mainUrl)).text
 
-        // FIX: Simplified Regex that catches m3u8 inside normal scripts and packed scripts
+        // Simplified Regex that catches m3u8 inside normal scripts and packed scripts
         val m3u8Regex = Regex("""["']([^"']+\.m3u8.*?)["']""")
         val match = m3u8Regex.find(doc)
 
         if (match != null) {
             val streamUrl = match.groupValues[1]
             
-            // FIX: Using direct ExtractorLink constructor with positional arguments
-            // Signature: (source, name, url, referer, quality, isM3u8)
+            // FIX: Use newExtractorLink instead of deprecated constructor
             callback.invoke(
-                ExtractorLink(
-                    "Hattrick",
-                    "Hattrick Stream",
-                    streamUrl,
-                    url, // Referer
-                    Qualities.Unknown.value,
-                    true // isM3u8
+                newExtractorLink(
+                    source = "Hattrick",
+                    name = "Hattrick Stream",
+                    url = streamUrl,
+                    referer = url,
+                    quality = Qualities.Unknown.value,
+                    isM3u8 = true
                 )
             )
             return true
