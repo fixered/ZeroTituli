@@ -15,6 +15,7 @@ class DaddyLive : MainAPI() {
     override var name = "DaddyLive"
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Live)
+    val cfKiller = CloudflareKiller()
 
     data class Channel(val id: String, val name: String)
 
@@ -58,7 +59,6 @@ class DaddyLive : MainAPI() {
             name = title,
             url = url,
             dataUrl = url,
-            type = TvType.Live
         )
     }
 
