@@ -1,3 +1,19 @@
+package it.zeroTituli
+
+import com.lagradost.api.Log
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.network.CloudflareKiller
+import com.lagradost.cloudstream3.utils.*
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
+import okhttp3.Response
+import org.jsoup.nodes.
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import org.jsoup.Jsoup
+import com.fasterxml.jackson.module.kotlin.readValue
+
+
 class HattrickProvider : MainAPI() {
     override var mainUrl = "https://www.hattrick.ws"
     override var name = "Hattrick"
