@@ -107,8 +107,9 @@ class DaddyLive : MainAPI() {
             catch (e: Exception) {
                 null
             }
+            val link = url
             if (link == null) return@mapNotNull null
-                Link(lang, url, host)
+                Link(lang, link, host)
         }
         links.map {
             callback(
