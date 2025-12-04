@@ -53,7 +53,7 @@ class DaddyLive : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val channelId = url.substringAfter("id=")
         val channel = channels.find { it.id == channelId }
-        val title = channel?.name ?: "Channel $channelId"
+        val title = channel?.name ?: "Channel $channelId v2"
 
         return newLiveStreamLoadResponse(
             name = title,
