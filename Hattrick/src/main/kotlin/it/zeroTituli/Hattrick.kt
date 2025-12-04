@@ -1,236 +1,123 @@
-package it.zeroTituli
-
-import com.lagradost.api.Log
-import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.network.CloudflareKiller
-import com.lagradost.cloudstream3.utils.*
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.Interceptor
-import okhttp3.Response
-import org.jsoup.nodes.Document
-
-class Hattrick : MainAPI() {
-    override var lang = "it"
-    override var mainUrl = "https://hattrick.ws"
+class HattrickProvider : MainAPI() {
+    override var mainUrl = "https://www.hattrick.ws"
     override var name = "Hattrick"
-    override val hasMainPage = true
-    override val hasChromecastSupport = true
     override val supportedTypes = setOf(TvType.Live)
-    val cfKiller = CloudflareKiller()
 
+    // 1. Parsing the Schedule Page
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(mainUrl).document
-
-        val sections = document.select("div.row").filter { row ->
-            row.select("button.btn a[href]").isNotEmpty()
-        }
-
-        if (sections.isEmpty()) throw ErrorLoadingException()
-
-        return newHomePageResponse(sections.mapNotNull { row ->
-            val categoryName = row.select("div.details > a.game-name > span").text().ifEmpty { 
-                row.select("div.details > p.date").text() 
-            }
-            
-            val shows = row.select("button.btn").mapNotNull { btn ->
-                val href = btn.selectFirst("a")?.attr("href") ?: return@mapNotNull null
-                if (href.isBlank() || href == "#") return@mapNotNull null
-                
-                val name = btn.selectFirst("a")?.text() ?: return@mapNotNull null
-                val posterUrl = row.select("div.logos > img").attr("src").let {
-                    if (it.isNotBlank()) fixUrl(it) else null
-                }
-                
-                newLiveSearchResponse(name, fixUrl(href), TvType.Live) {
-                    this.posterUrl = posterUrl
-                }
-            }
-            
-            if (shows.isEmpty()) return@mapNotNull null
-            
-            HomePageList(
-                categoryName,
-                shows,
-                isHorizontalImages = true
-            )
-        }, false)
-    }
-
-    override suspend fun load(url: String): LoadResponse {
-        val posterUrl = "https://logowiki.net/wp-content/uploads/imgp/Hattrick-Logo-1-5512.jpg"
-        val title = url.substringAfterLast("/").substringBefore(".htm").replaceFirstChar { it.uppercase() }
-        val description = "Stream from hattrick.ws v2"
+        // In a real plugin, you fetch the URL. 
+        // For this example, assume 'document' is the Jsoup parsed HTML you provided.
+        val document = app.get(mainUrl).document 
         
-        return newLiveStreamLoadResponse(name = title, url = url, dataUrl = url) {
-            this.posterUrl = posterUrl
-            this.plot = description
-        }
-    }
+        val items = ArrayList<HomePageList>()
+        val liveEvents = ArrayList<SearchResponse>()
 
-    private fun extractIframeFromObfuscated(scriptData: String): String? {
-        try {
-            // Decodifica lo script offuscato
-            val deobfuscated = getAndUnpack(scriptData)
-            Log.d("Hattrick-Deobfuscated", deobfuscated)
+        // The matches are contained in div.events -> div.row
+        document.select("div.events div.row").forEach { row ->
+            // Extract Team Names
+            val nameInfo = row.select(".details .game-name").text().trim()
             
-            // Cerca l'URL dell'iframe nel codice decodificato
-            val iframeRegex = """src=["']([^"']+)["']""".toRegex()
-            val match = iframeRegex.find(deobfuscated)
+            // Extract Time/League info
+            val dateInfo = row.select(".details .date").text().trim()
             
-            return match?.groupValues?.get(1)
-        } catch (e: Exception) {
-            Log.e("Hattrick-Extract", "Error extracting iframe: ${e.message}")
-            return null
-        }
-    }
+            // Extract Image
+            val imgUrl = row.select(".logos img").attr("src")
 
-    private fun getStreamUrl(document: Document): String? {
-        try {
-            val directIframe = document.select("iframe[src]").firstOrNull()?.attr("src")
-            if (!directIframe.isNullOrBlank()) {
-                Log.d("Hattrick-DirectIframe", directIframe)
-                return directIframe
-            }
+            // We need to pass ALL the links to the next stage (load)
+            // We verify the row has actual buttons/links
+            val links = row.select(".details button a").map { it.attr("href") }
 
-            val scripts = document.select("script")
-            for (script in scripts) {
-                val scriptData = script.data()
-                if (scriptData.contains("eval(") || scriptData.contains("function(")) {
-                    val iframeUrl = extractIframeFromObfuscated(scriptData)
-                    if (iframeUrl != null) {
-                        Log.d("Hattrick-ObfuscatedIframe", iframeUrl)
-                        return iframeUrl
+            if (nameInfo.isNotBlank() && links.isNotEmpty()) {
+                liveEvents.add(
+                    LiveSearchResponse(
+                        // Name: "Athletic Bilbao - Real Madrid"
+                        name = nameInfo,
+                        // URL: We pass all links encoded in JSON or similar to the load function
+                        // For simplicity, we pass the first one, but ideally, you save the list
+                        url = ProxyMapper.toJson(links), 
+                        apiName = this@HattrickProvider.name,
+                        type = TvType.Live,
+                        posterUrl = imgUrl
+                    ).apply {
+                        // Add the time/league as plot or description
+                        this.plot = dateInfo
                     }
-                }
+                )
             }
-
-            return null
-        } catch (e: Exception) {
-            Log.e("Hattrick-GetStream", "Error: ${e.message}")
-            return null
         }
+
+        items.add(HomePageList("Live Events", liveEvents))
+        return HomePageResponse(items)
     }
 
-    private suspend fun extractVideoStream(url: String, ref: String, depth: Int = 1): Pair<String, String>? {
-        if (url.toHttpUrlOrNull() == null) return null
-        if (depth > 8) return null
+    // 2. Loading the Links (When user clicks the match)
+    override suspend fun load(url: String): LoadResponse {
+        // We decoded the list of links we saved earlier
+        val linkList = ProxyMapper.toObject<List<String>>(url)
 
-        try {
-            Log.d("Hattrick-Extract", "Depth $depth: $url")
-            
-            val doc = app.get(url, referer = ref).document
-            
-            // Cerca lo stream URL usando la funzione migliorata
-            val streamUrl = getStreamUrl(doc)
-            
-            if (!streamUrl.isNullOrBlank()) {
-                Log.d("Hattrick-Found", "Stream URL: $streamUrl")
+        return LiveStreamLoadResponse(
+            name = "Match Options",
+            url = url,
+            apiName = this.name,
+            type = TvType.Live,
+            plot = "Choose a source",
+            episodes = linkList.mapIndexed { index, linkUrl ->
+                // Create a clickable episode for each button (Sport 24, Dazn 1, etc)
+                // We need to fix relative URLs if they exist
+                val fixedUrl = fixUrl(linkUrl)
                 
-                // Se troviamo un URL .m3u8, lo ritorniamo direttamente
-                if (streamUrl.contains(".m3u8")) {
-                    return streamUrl to url
-                }
-                
-                // Altrimenti continuiamo a scavare
-                return extractVideoStream(fixUrl(streamUrl), url, depth + 1)
+                LiveStreamEpisode(
+                    name = "Source ${index + 1}", // Or parse the button text if you passed it
+                    url = fixedUrl // This is the link to the .htm page containing the player
+                )
             }
-            
-            // Se non troviamo niente, cerchiamo altri iframe
-            val nextIframe = doc.select("iframe[src]").firstOrNull()?.attr("src")
-            if (!nextIframe.isNullOrBlank()) {
-                return extractVideoStream(fixUrl(nextIframe), url, depth + 1)
-            }
-            
-            return null
-        } catch (e: Exception) {
-            Log.e("Hattrick-Extract", "Error at depth $depth: ${e.message}")
-            return null
-        }
+        )
     }
 
+    // 3. Extracting the Stream (The Token Logic)
     override suspend fun loadLinks(
-        data: String,
+        url: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        try {
-            Log.d("Hattrick-LoadLinks", "Loading: $data")
+        // 'url' here is the page (e.g., https://www.hattrick.ws/sport24hd.htm)
+        
+        // Fetch the page source
+        val doc = app.get(url, headers = mapOf("Referer" to mainUrl)).text
+
+        // --- THE SOLUTION TO YOUR QUESTION ---
+        // We look for the .m3u8 inside the HTML source. 
+        // It usually includes the token automatically.
+        
+        // Common regex to find m3u8 in scripts (Clappr, JWPlayer, etc.)
+        val m3u8Regex = Regex("""["']([^"']+\.m3u8.*?)["']""")
+        val match = m3u8Regex.find(doc)
+
+        if (match != null) {
+            val streamUrl = match.groupValues[1]
             
-            val document = app.get(data).document
-            
-            val iframes = document.select("iframe[src]")
-            
-            if (iframes.isEmpty()) {
-                Log.d("Hattrick-LoadLinks", "No iframes found, searching in scripts")
-                val streamUrl = getStreamUrl(document)
-                if (streamUrl != null) {
-                    val result = extractVideoStream(streamUrl, data, 1)
-                    if (result != null) {
-                        callback(
-                            ExtractorLink(
-                                source = this.name,
-                                name = "Hattrick",
-                                url = result.first,
-                                referer = result.second,
-                                quality = Qualities.Unknown.value,
-                                type = ExtractorLinkType.M3U8
-                            )
-                        )
-                        return true
-                    }
-                }
-            }
-            
-            val links = iframes.mapNotNull { iframe ->
-                val iframeUrl = iframe.attr("src")
-                if (iframeUrl.isBlank()) return@mapNotNull null
-                
-                Log.d("Hattrick-Iframe", "Found iframe: $iframeUrl")
-                
-                val domain = try {
-                    val uri = java.net.URL(fixUrl(iframeUrl))
-                    "${uri.protocol}://${uri.host}"
-                } catch (e: Exception) {
-                    null
-                }
-                
-                if (domain == null) return@mapNotNull null
-                
-                val result = extractVideoStream(fixUrl(iframeUrl), data, 1)
-                if (result == null) return@mapNotNull null
-                
-                Link("it", result.first, result.second)
-            }
-            
-            links.forEach { link ->
-                Log.d("Hattrick-Link", "Adding link: ${link.url}")
-                callback(
-                    ExtractorLink(
-                        source = this.name,
-                        name = link.lang.uppercase(),
-                        url = link.url,
-                        referer = link.ref,
-                        quality = Qualities.Unknown.value,
-                        type = ExtractorLinkType.M3U8
-                    )
+            // Generate the stream link
+            callback.invoke(
+                ExtractorLink(
+                    source = "Hattrick",
+                    name = "Hattrick Stream",
+                    url = streamUrl, // This URL contains the token
+                    referer = url, // IMPORTANT: The Referer must be the page providing the video
+                    quality = Qualities.Unknown.value,
+                    isM3u8 = true
                 )
-            }
-            
-            return links.isNotEmpty()
-        } catch (e: Exception) {
-            Log.e("Hattrick-LoadLinks", "Error: ${e.message}")
-            return false
+            )
+            return true
+        } 
+        
+        // If not found directly, check for IFrames
+        val iframeSrc = Jsoup.parse(doc).select("iframe").attr("src")
+        if (iframeSrc.isNotBlank()) {
+            // Recursively load the iframe content
+             return loadLinks(fixUrl(iframeSrc), isCasting, subtitleCallback, callback)
         }
-    }
 
-    override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor {
-        return cfKiller
+        return false
     }
-
-    data class Link(
-        val lang: String,
-        val url: String,
-        val ref: String
-    )
 }
