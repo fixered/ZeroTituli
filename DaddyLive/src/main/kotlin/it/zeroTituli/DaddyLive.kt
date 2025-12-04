@@ -37,25 +37,29 @@ class DaddyLive : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
+    val document = app.get(url).document
 
-        // Extract title
-        val title = document.selectFirst("h2")?.text() ?: "Live Stream"
+    val title = document.selectFirst("h2")?.text() ?: "Live Stream"
 
-        // Extract iframe URLs for all players
-        val playerButtons = document.select("button.player-btn")
-        val players = playerButtons.mapNotNull { btn ->
-            val playerName = btn.attr("title")
-            val playerUrl = btn.attr("data-url")
-            if (playerUrl.isNotEmpty()) playerName to playerUrl else null
-        }.toMap()
-
-        return newLiveStreamLoadResponse(title, url, dataUrl = url) {
-            players.forEach { (name, link) ->
-                addLink(name, link)
-            }
-        }
+    // Extract iframe URLs for all players
+    val playerButtons = document.select("button.player-btn")
+    val links = playerButtons.mapNotNull { btn ->
+        val playerName = btn.attr("title")
+        val playerUrl = btn.attr("data-url")
+        if (playerUrl.isNotEmpty()) {
+            newExtractorLink(
+                source = name,
+                name = playerName,
+                url = playerUrl,
+                type = ExtractorLinkType.LIVE
+            )
+        } else null
     }
+
+    return newLiveStreamLoadResponse(title, url, dataUrl = url) {
+        links.forEach { link -> this.addExtractorLink(link) }
+    }
+}
 
     override suspend fun loadLinks(
         data: String,
