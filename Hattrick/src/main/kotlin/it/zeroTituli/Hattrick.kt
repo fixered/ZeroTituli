@@ -129,3 +129,4 @@ class Hattrick : MainAPI() {
         }
         return false
     }
+}
