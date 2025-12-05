@@ -23,7 +23,6 @@ class Hattrick : MainAPI() {
 
     private val LOGO = "https://www.tuttotech.net/wp-content/uploads/2020/08/NOW-TV-Sky-On-Demand-logo-2.png"
 
-    // 1️⃣ Main Page: Aggiornato per usare HomePageList e newLiveSearchResponse
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
         val document = app.get(mainUrl).document
 
@@ -32,14 +31,12 @@ class Hattrick : MainAPI() {
             val href = fixUrl(element.attr("href"))
 
             if (channelName.isNotEmpty()) {
-                // FIX: Uso di newLiveSearchResponse invece del costruttore deprecato
                 newLiveSearchResponse(channelName, href, TvType.Live) {
                     this.posterUrl = LOGO
                 }
             } else null
         }
 
-        // FIX: newHomePageResponse richiede una lista di HomePageList
         return newHomePageResponse(
             list = listOf(
                 HomePageList(
@@ -52,13 +49,13 @@ class Hattrick : MainAPI() {
         )
     }
 
-    // 2️⃣ Load: Rimane simile ma usa newTvSeriesLoadResponse
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
         val title = document.title().replace("Hattrick", "").trim()
 
         var iframeUrl = document.select("iframe").attr("src")
 
+        // Cerca iframe nel body se non trovato direttamente
         if (iframeUrl.isEmpty() || (!iframeUrl.contains("planetary") && !iframeUrl.contains("token="))) {
             val html = document.html()
             val regex = """(https?://[^\s"'<>]+token=[a-zA-Z0-9%\-_]+)""".toRegex()
@@ -71,11 +68,10 @@ class Hattrick : MainAPI() {
         return newTvSeriesLoadResponse(title, url, TvType.Live, listOf()) {
             this.posterUrl = LOGO
             this.plot = "Diretta streaming di $title"
-            this.tags = listOf(iframeUrl) // Passiamo l'URL trovato ai tags
+            this.tags = listOf(iframeUrl)
         }
     }
 
-    // 3️⃣ Load Links: Aggiornato per usare newExtractorLink
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -85,7 +81,7 @@ class Hattrick : MainAPI() {
 
         val document = app.get(data).document
         
-        // Logica di ricerca iframe (ridondanza di sicurezza)
+        // Logica di ricerca iframe
         var iframeUrl = document.select("iframe[src*='token=']").attr("src")
         if (iframeUrl.isEmpty()) iframeUrl = document.select("iframe[src*='planetary']").attr("src")
         
@@ -112,15 +108,18 @@ class Hattrick : MainAPI() {
                     val m3u8Path = "$basePath/index.fmp4.m3u8?token=$token"
                     val finalUrl = "https://planetary.lovecdn.ru$m3u8Path"
 
-                    // FIX: Uso di newExtractorLink invece del costruttore deprecato
+                    // FIX: Sintassi aggiornata come in CalcioStreaming
                     callback.invoke(
                         newExtractorLink(
+                            source = this.name,
                             name = "Hattrick (Veloce)",
                             url = finalUrl,
-                            referer = "https://planetary.lovecdn.ru/",
-                            isM3u8 = true,
-                            quality = Qualities.Unknown.value
-                        )
+                            type = ExtractorLinkType.M3U8 // Qui usiamo l'ENUM invece di boolean
+                        ) {
+                            // Qui dentro (nella lambda) si mettono referer e quality
+                            this.referer = "https://planetary.lovecdn.ru/"
+                            this.quality = Qualities.Unknown.value
+                        }
                     )
                     return true
                 }
@@ -130,4 +129,3 @@ class Hattrick : MainAPI() {
         }
         return false
     }
-}
